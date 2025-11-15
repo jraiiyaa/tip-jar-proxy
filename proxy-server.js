@@ -13,6 +13,29 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Cache for game passes (userId -> { passes, timestamp })
+const passCache = {};
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+// Get cached passes or return null if expired
+function getCachedPasses(userId) {
+	const cached = passCache[userId];
+	if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+		console.log(`Using cached passes for user ${userId}`);
+		return cached.passes;
+	}
+	return null;
+}
+
+// Store passes in cache
+function cachePasses(userId, passes) {
+	passCache[userId] = {
+		passes: passes,
+		timestamp: Date.now()
+	};
+	console.log(`Cached ${passes.length} passes for user ${userId}`);
+}
+
 // Fetch game passes for a universe (experience-specific passes)
 async function fetchUniverseGamePasses(universeId) {
 	return new Promise((resolve, reject) => {
@@ -95,6 +118,12 @@ async function fetchUserGames(userId) {
 // Fetch all game passes from all games created by a user
 async function fetchAllUserGamePasses(userId) {
 	try {
+		// Check cache first
+		const cached = getCachedPasses(userId);
+		if (cached) {
+			return cached;
+		}
+		
 		// Step 1: Get all games created by the user
 		console.log('Fetching games created by user:', userId);
 		const gamesResponse = await fetchUserGames(userId);
@@ -106,52 +135,52 @@ async function fetchAllUserGamePasses(userId) {
 			return [];
 		}
 		
-		// Step 2: Fetch passes from each game
-		const allPasses = [];
+		// Step 2: Fetch passes from each game IN PARALLEL (much faster!)
 		const universeIds = games.map(game => game.id || game.universeId).filter(id => id);
+		const gamesToCheck = universeIds.slice(0, 10); // Limit to first 10 games
 		
-		console.log(`Fetching passes from ${universeIds.length} games...`);
+		console.log(`Fetching passes from ${gamesToCheck.length} games in parallel...`);
 		
-		// Fetch passes from each game (limit to first 10 games to avoid timeout)
-		const gamesToCheck = universeIds.slice(0, 10);
-		for (const universeId of gamesToCheck) {
+		// Fetch all games in parallel using Promise.all
+		const passPromises = gamesToCheck.map(async (universeId) => {
 			try {
-				console.log(`Fetching passes for game ${universeId}...`);
 				const passesResponse = await fetchUniverseGamePasses(universeId);
-				
-				// Debug: Log the full response structure
-				console.log(`Response for game ${universeId}:`, JSON.stringify(passesResponse, null, 2));
-				console.log(`Response keys:`, Object.keys(passesResponse || {}));
-				
-				// The API returns { gamePasses: [...], nextPageToken: "" }
 				const passesArray = passesResponse.gamePasses || passesResponse.data || (Array.isArray(passesResponse) ? passesResponse : []);
 				
-				console.log(`Passes array type:`, typeof passesArray, `Is array:`, Array.isArray(passesArray), `Length:`, passesArray ? passesArray.length : 0);
-				
 				if (Array.isArray(passesArray) && passesArray.length > 0) {
-					for (const pass of passesArray) {
-						// The API returns: id, name/displayName, displayIconImageAssetId, displayDescription
+					const formattedPasses = passesArray.map(pass => {
 						const iconAssetId = pass.displayIconImageAssetId || pass.iconImageAssetId;
 						const iconUrl = iconAssetId ? `rbxassetid://${iconAssetId}` : '';
 						
-						allPasses.push({
+						return {
 							id: pass.id || pass.productId || pass.gamePassId || pass.assetId || pass.passId,
 							name: pass.displayName || pass.name || 'Unknown',
 							icon: iconUrl || pass.iconImageUrl || pass.icon || pass.imageUrl || '',
 							description: pass.displayDescription || pass.description || ''
-						});
-					}
+						};
+					});
+					
 					console.log(`Found ${passesArray.length} passes in game ${universeId}`);
-				} else {
-					console.log(`No passes found in game ${universeId} (array empty or not an array)`);
+					return formattedPasses;
 				}
+				return [];
 			} catch (error) {
 				console.error(`Error fetching passes for game ${universeId}:`, error.message);
-				// Continue with next game
+				return [];
 			}
-		}
+		});
+		
+		// Wait for all promises to complete
+		const allResults = await Promise.all(passPromises);
+		
+		// Flatten all passes into one array
+		const allPasses = allResults.flat();
 		
 		console.log(`Total passes found across all games: ${allPasses.length}`);
+		
+		// Cache the results
+		cachePasses(userId, allPasses);
+		
 		return allPasses;
 		
 	} catch (error) {
