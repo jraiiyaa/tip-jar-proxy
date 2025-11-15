@@ -123,17 +123,22 @@ async function fetchAllUserGamePasses(userId) {
 				console.log(`Response for game ${universeId}:`, JSON.stringify(passesResponse, null, 2));
 				console.log(`Response keys:`, Object.keys(passesResponse || {}));
 				
-				const passesArray = passesResponse.data || (Array.isArray(passesResponse) ? passesResponse : []);
+				// The API returns { gamePasses: [...], nextPageToken: "" }
+				const passesArray = passesResponse.gamePasses || passesResponse.data || (Array.isArray(passesResponse) ? passesResponse : []);
 				
-				console.log(`Passes array type:`, typeof passesArray, `Is array:`, Array.isArray(passesArray), `Length:`, passesArray.length);
+				console.log(`Passes array type:`, typeof passesArray, `Is array:`, Array.isArray(passesArray), `Length:`, passesArray ? passesArray.length : 0);
 				
 				if (Array.isArray(passesArray) && passesArray.length > 0) {
 					for (const pass of passesArray) {
+						// The API returns: id, name/displayName, displayIconImageAssetId, displayDescription
+						const iconAssetId = pass.displayIconImageAssetId || pass.iconImageAssetId;
+						const iconUrl = iconAssetId ? `rbxassetid://${iconAssetId}` : '';
+						
 						allPasses.push({
-							id: pass.id || pass.gamePassId || pass.assetId || pass.passId,
-							name: pass.name || pass.displayName || 'Unknown',
-							icon: pass.iconImageUrl || pass.icon || pass.imageUrl || '',
-							description: pass.description || ''
+							id: pass.id || pass.productId || pass.gamePassId || pass.assetId || pass.passId,
+							name: pass.displayName || pass.name || 'Unknown',
+							icon: iconUrl || pass.iconImageUrl || pass.icon || pass.imageUrl || '',
+							description: pass.displayDescription || pass.description || ''
 						});
 					}
 					console.log(`Found ${passesArray.length} passes in game ${universeId}`);
@@ -202,17 +207,21 @@ app.get('/api/gamepasses', async (req, res) => {
 				console.log('Universe API Response:', JSON.stringify(response, null, 2));
 				console.log('Response keys:', Object.keys(response || {}));
 
-				// The new API returns data in "data" array, or directly as array
-				const gamePassesArray = response.data || (Array.isArray(response) ? response : []);
+				// The API returns { gamePasses: [...], nextPageToken: "" }
+				const gamePassesArray = response.gamePasses || response.data || (Array.isArray(response) ? response : []);
 				
 				if (Array.isArray(gamePassesArray) && gamePassesArray.length > 0) {
 					const allGamePasses = [];
 					for (const item of gamePassesArray) {
+						// The API returns: id, name/displayName, displayIconImageAssetId, displayDescription
+						const iconAssetId = item.displayIconImageAssetId || item.iconImageAssetId;
+						const iconUrl = iconAssetId ? `rbxassetid://${iconAssetId}` : '';
+						
 						allGamePasses.push({
-							id: item.id || item.gamePassId || item.assetId || item.passId,
-							name: item.name || item.displayName || 'Unknown',
-							icon: item.iconImageUrl || item.icon || item.imageUrl || '',
-							description: item.description || ''
+							id: item.id || item.productId || item.gamePassId || item.assetId || item.passId,
+							name: item.displayName || item.name || 'Unknown',
+							icon: iconUrl || item.iconImageUrl || item.icon || item.imageUrl || '',
+							description: item.displayDescription || item.description || ''
 						});
 					}
 					
