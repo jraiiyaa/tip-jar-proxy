@@ -118,7 +118,14 @@ async function fetchAllUserGamePasses(userId) {
 			try {
 				console.log(`Fetching passes for game ${universeId}...`);
 				const passesResponse = await fetchUniverseGamePasses(universeId);
+				
+				// Debug: Log the full response structure
+				console.log(`Response for game ${universeId}:`, JSON.stringify(passesResponse, null, 2));
+				console.log(`Response keys:`, Object.keys(passesResponse || {}));
+				
 				const passesArray = passesResponse.data || (Array.isArray(passesResponse) ? passesResponse : []);
+				
+				console.log(`Passes array type:`, typeof passesArray, `Is array:`, Array.isArray(passesArray), `Length:`, passesArray.length);
 				
 				if (Array.isArray(passesArray) && passesArray.length > 0) {
 					for (const pass of passesArray) {
@@ -130,6 +137,8 @@ async function fetchAllUserGamePasses(userId) {
 						});
 					}
 					console.log(`Found ${passesArray.length} passes in game ${universeId}`);
+				} else {
+					console.log(`No passes found in game ${universeId} (array empty or not an array)`);
 				}
 			} catch (error) {
 				console.error(`Error fetching passes for game ${universeId}:`, error.message);
