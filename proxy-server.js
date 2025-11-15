@@ -53,6 +53,99 @@ async function fetchUniverseGamePasses(universeId) {
 	});
 }
 
+// Fetch games created by a user
+async function fetchUserGames(userId) {
+	return new Promise((resolve, reject) => {
+		const url = `https://games.roblox.com/v2/users/${userId}/games?accessFilter=Public&limit=50&sortOrder=Asc`;
+		
+		console.log('Calling Roblox User Games API:', url);
+
+		https.get(url, (res) => {
+			console.log('User Games API Response status:', res.statusCode);
+			let data = '';
+
+			res.on('data', (chunk) => {
+				data += chunk;
+			});
+
+			res.on('end', () => {
+				try {
+					if (res.statusCode !== 200) {
+						console.error('User Games API returned error status:', res.statusCode);
+						console.error('Response body:', data);
+						reject(new Error(`API returned status ${res.statusCode}: ${data}`));
+						return;
+					}
+					
+					const jsonData = JSON.parse(data);
+					resolve(jsonData);
+				} catch (error) {
+					console.error('Failed to parse JSON:', error);
+					console.error('Raw response:', data);
+					reject(error);
+				}
+			});
+		}).on('error', (error) => {
+			console.error('HTTP request error:', error);
+			reject(error);
+		});
+	});
+}
+
+// Fetch all game passes from all games created by a user
+async function fetchAllUserGamePasses(userId) {
+	try {
+		// Step 1: Get all games created by the user
+		console.log('Fetching games created by user:', userId);
+		const gamesResponse = await fetchUserGames(userId);
+		
+		const games = gamesResponse.data || [];
+		console.log(`Found ${games.length} games created by user ${userId}`);
+		
+		if (games.length === 0) {
+			return [];
+		}
+		
+		// Step 2: Fetch passes from each game
+		const allPasses = [];
+		const universeIds = games.map(game => game.id || game.universeId).filter(id => id);
+		
+		console.log(`Fetching passes from ${universeIds.length} games...`);
+		
+		// Fetch passes from each game (limit to first 10 games to avoid timeout)
+		const gamesToCheck = universeIds.slice(0, 10);
+		for (const universeId of gamesToCheck) {
+			try {
+				console.log(`Fetching passes for game ${universeId}...`);
+				const passesResponse = await fetchUniverseGamePasses(universeId);
+				const passesArray = passesResponse.data || (Array.isArray(passesResponse) ? passesResponse : []);
+				
+				if (Array.isArray(passesArray) && passesArray.length > 0) {
+					for (const pass of passesArray) {
+						allPasses.push({
+							id: pass.id || pass.gamePassId || pass.assetId || pass.passId,
+							name: pass.name || pass.displayName || 'Unknown',
+							icon: pass.iconImageUrl || pass.icon || pass.imageUrl || '',
+							description: pass.description || ''
+						});
+					}
+					console.log(`Found ${passesArray.length} passes in game ${universeId}`);
+				}
+			} catch (error) {
+				console.error(`Error fetching passes for game ${universeId}:`, error.message);
+				// Continue with next game
+			}
+		}
+		
+		console.log(`Total passes found across all games: ${allPasses.length}`);
+		return allPasses;
+		
+	} catch (error) {
+		console.error('Error fetching user game passes:', error);
+		return [];
+	}
+}
+
 // Fetch game passes created by a user (legacy - for universal passes)
 async function fetchGamePasses(userId, cursor = '') {
 	return new Promise((resolve, reject) => {
@@ -140,7 +233,7 @@ app.get('/api/gamepasses', async (req, res) => {
 			}
 		}
 		
-		// Fallback to userId (universal passes)
+		// Fallback to userId - fetch passes from all games created by user
 		if (!userId) {
 			return res.status(400).json({
 				success: false,
@@ -148,37 +241,12 @@ app.get('/api/gamepasses', async (req, res) => {
 			});
 		}
 
-		console.log('Fetching universal game passes for user:', userId);
-		const allGamePasses = [];
-		let nextPageCursor = '';
-
-		// Fetch all pages
-		do {
-			const response = await fetchGamePasses(userId, nextPageCursor);
-			
-			console.log('Catalog API Response:', JSON.stringify(response, null, 2));
-
-			if (response && response.data) {
-				console.log(`Found ${response.data.length} items in this page`);
-				for (const item of response.data) {
-					const gamePassId = item.id || item.assetId;
-					
-					allGamePasses.push({
-						id: gamePassId,
-						name: item.name || 'Unknown',
-						icon: item.iconImageUrl || '',
-						description: item.description || ''
-					});
-				}
-
-				nextPageCursor = response.nextPageCursor || '';
-			} else {
-				console.log('No data in response or response is null');
-				break;
-			}
-		} while (nextPageCursor);
+		console.log('Fetching game passes from all games created by user:', userId);
 		
-		console.log(`Total universal game passes found: ${allGamePasses.length}`);
+		// Fetch passes from all games the user created
+		const allGamePasses = await fetchAllUserGamePasses(userId);
+		
+		console.log(`Total game passes found across all user's games: ${allGamePasses.length}`);
 
 		res.json({
 			success: true,
