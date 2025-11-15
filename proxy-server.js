@@ -13,19 +13,15 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Fetch game passes created by a user
-async function fetchGamePasses(userId, cursor = '') {
+// Fetch game passes for a universe (experience-specific passes)
+async function fetchUniverseGamePasses(universeId) {
 	return new Promise((resolve, reject) => {
-		let url = `https://catalog.roblox.com/v1/search/items?category=GamePass&creatorTargetId=${userId}&creatorType=User&limit=100&sortOrder=Desc`;
-		if (cursor) {
-			url += `&cursor=${cursor}`;
-		}
-
-		console.log('Calling Roblox API:', url);
+		const url = `https://games.roblox.com/v1/games/${universeId}/game-passes`;
+		
+		console.log('Calling Roblox Universe API:', url);
 
 		https.get(url, (res) => {
 			console.log('Response status:', res.statusCode);
-			console.log('Response headers:', res.headers);
 			let data = '';
 
 			res.on('data', (chunk) => {
@@ -46,18 +42,88 @@ async function fetchGamePasses(userId, cursor = '') {
 	});
 }
 
-// API endpoint: GET /api/gamepasses?userId=123456789
+// Fetch game passes created by a user (legacy - for universal passes)
+async function fetchGamePasses(userId, cursor = '') {
+	return new Promise((resolve, reject) => {
+		let url = `https://catalog.roblox.com/v1/search/items?category=GamePass&creatorTargetId=${userId}&creatorType=User&limit=100&sortOrder=Desc`;
+		if (cursor) {
+			url += `&cursor=${cursor}`;
+		}
+
+		console.log('Calling Roblox Catalog API:', url);
+
+		https.get(url, (res) => {
+			console.log('Response status:', res.statusCode);
+			let data = '';
+
+			res.on('data', (chunk) => {
+				data += chunk;
+			});
+
+			res.on('end', () => {
+				try {
+					const jsonData = JSON.parse(data);
+					resolve(jsonData);
+				} catch (error) {
+					reject(error);
+				}
+			});
+		}).on('error', (error) => {
+			reject(error);
+		});
+	});
+}
+
+// API endpoint: GET /api/gamepasses?universeId=123456789 OR ?userId=123456789
 app.get('/api/gamepasses', async (req, res) => {
 	try {
+		const universeId = req.query.universeId;
 		const userId = req.query.userId;
 
+		// Prioritize universeId (experience-specific passes)
+		if (universeId) {
+			console.log('Fetching game passes for universe:', universeId);
+			const response = await fetchUniverseGamePasses(universeId);
+			
+			console.log('Universe API Response:', JSON.stringify(response, null, 2));
+
+			if (response && response.data) {
+				const allGamePasses = [];
+				for (const item of response.data) {
+					allGamePasses.push({
+						id: item.id || item.gamePassId,
+						name: item.name || 'Unknown',
+						icon: item.iconImageUrl || '',
+						description: item.description || ''
+					});
+				}
+				
+				console.log(`Total universe game passes found: ${allGamePasses.length}`);
+				
+				return res.json({
+					success: true,
+					gamePasses: allGamePasses,
+					count: allGamePasses.length
+				});
+			} else {
+				console.log('No data in universe response');
+				return res.json({
+					success: true,
+					gamePasses: [],
+					count: 0
+				});
+			}
+		}
+		
+		// Fallback to userId (universal passes)
 		if (!userId) {
 			return res.status(400).json({
 				success: false,
-				error: 'userId parameter is required'
+				error: 'universeId or userId parameter is required'
 			});
 		}
 
+		console.log('Fetching universal game passes for user:', userId);
 		const allGamePasses = [];
 		let nextPageCursor = '';
 
@@ -65,8 +131,7 @@ app.get('/api/gamepasses', async (req, res) => {
 		do {
 			const response = await fetchGamePasses(userId, nextPageCursor);
 			
-			// Debug: Log the response from Roblox API
-			console.log('Roblox API Response:', JSON.stringify(response, null, 2));
+			console.log('Catalog API Response:', JSON.stringify(response, null, 2));
 
 			if (response && response.data) {
 				console.log(`Found ${response.data.length} items in this page`);
@@ -84,12 +149,11 @@ app.get('/api/gamepasses', async (req, res) => {
 				nextPageCursor = response.nextPageCursor || '';
 			} else {
 				console.log('No data in response or response is null');
-				console.log('Response structure:', Object.keys(response || {}));
 				break;
 			}
 		} while (nextPageCursor);
 		
-		console.log(`Total game passes found: ${allGamePasses.length}`);
+		console.log(`Total universal game passes found: ${allGamePasses.length}`);
 
 		res.json({
 			success: true,
