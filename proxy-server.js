@@ -21,7 +21,11 @@ async function fetchGamePasses(userId, cursor = '') {
 			url += `&cursor=${cursor}`;
 		}
 
+		console.log('Calling Roblox API:', url);
+
 		https.get(url, (res) => {
+			console.log('Response status:', res.statusCode);
+			console.log('Response headers:', res.headers);
 			let data = '';
 
 			res.on('data', (chunk) => {
@@ -60,8 +64,12 @@ app.get('/api/gamepasses', async (req, res) => {
 		// Fetch all pages
 		do {
 			const response = await fetchGamePasses(userId, nextPageCursor);
+			
+			// Debug: Log the response from Roblox API
+			console.log('Roblox API Response:', JSON.stringify(response, null, 2));
 
 			if (response && response.data) {
+				console.log(`Found ${response.data.length} items in this page`);
 				for (const item of response.data) {
 					const gamePassId = item.id || item.assetId;
 					
@@ -75,9 +83,13 @@ app.get('/api/gamepasses', async (req, res) => {
 
 				nextPageCursor = response.nextPageCursor || '';
 			} else {
+				console.log('No data in response or response is null');
+				console.log('Response structure:', Object.keys(response || {}));
 				break;
 			}
 		} while (nextPageCursor);
+		
+		console.log(`Total game passes found: ${allGamePasses.length}`);
 
 		res.json({
 			success: true,
