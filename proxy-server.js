@@ -15,15 +15,26 @@ app.use(express.json());
 
 // Cache for game passes (userId -> { passes, timestamp })
 const passCache = {};
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+// Cache duration: 5 minutes (can be overridden with CACHE_DURATION env variable)
+const CACHE_DURATION = parseInt(process.env.CACHE_DURATION) || (5 * 60 * 1000); // Default: 5 minutes
 
 // Get cached passes or return null if expired
-function getCachedPasses(userId) {
+function getCachedPasses(userId, forceRefresh = false) {
+	if (forceRefresh) {
+		console.log(`Force refresh requested for user ${userId} - skipping cache`);
+		return null;
+	}
+	
 	const cached = passCache[userId];
 	if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
-		console.log(`Using cached passes for user ${userId}`);
+		console.log(`Using cached passes for user ${userId} (cache expires in ${Math.round((CACHE_DURATION - (Date.now() - cached.timestamp)) / 1000)}s)`);
 		return cached.passes;
 	}
+	
+	if (cached) {
+		console.log(`Cache expired for user ${userId} - fetching fresh data`);
+	}
+	
 	return null;
 }
 
@@ -116,10 +127,10 @@ async function fetchUserGames(userId) {
 }
 
 // Fetch all game passes from all games created by a user
-async function fetchAllUserGamePasses(userId) {
+async function fetchAllUserGamePasses(userId, forceRefresh = false) {
 	try {
-		// Check cache first
-		const cached = getCachedPasses(userId);
+		// Check cache first (unless force refresh)
+		const cached = getCachedPasses(userId, forceRefresh);
 		if (cached) {
 			return cached;
 		}
@@ -288,10 +299,13 @@ app.get('/api/gamepasses', async (req, res) => {
 			});
 		}
 
-		console.log('Fetching game passes from all games created by user:', userId);
+		// Check for refresh parameter (force refresh cache)
+		const forceRefresh = req.query.refresh === 'true' || req.query.refresh === '1';
+		
+		console.log('Fetching game passes from all games created by user:', userId, forceRefresh ? '(FORCE REFRESH)' : '');
 		
 		// Fetch passes from all games the user created
-		const allGamePasses = await fetchAllUserGamePasses(userId);
+		const allGamePasses = await fetchAllUserGamePasses(userId, forceRefresh);
 		
 		console.log(`Total game passes found across all user's games: ${allGamePasses.length}`);
 
@@ -314,7 +328,67 @@ app.get('/api/gamepasses', async (req, res) => {
 app.get('/', (req, res) => {
 	res.json({
 		status: 'online',
-		message: 'Tip Jar Proxy Server is running!'
+		message: 'Tip Jar Proxy Server is running!',
+		endpoints: {
+			gamePasses: '/api/gamepasses?userId=USER_ID&refresh=true (optional refresh to bypass cache)',
+			clearCache: '/api/cache/clear?userId=USER_ID (clear cache for specific user)',
+			cacheInfo: '/api/cache/info (get cache statistics)'
+		},
+		cacheDuration: `${CACHE_DURATION / 1000} seconds (${CACHE_DURATION / 60000} minutes)`
+	});
+});
+
+// Clear cache endpoint
+app.get('/api/cache/clear', (req, res) => {
+	const userId = req.query.userId;
+	
+	if (userId) {
+		if (passCache[userId]) {
+			delete passCache[userId];
+			console.log(`Cache cleared for user ${userId}`);
+			res.json({
+				success: true,
+				message: `Cache cleared for user ${userId}`
+			});
+		} else {
+			res.json({
+				success: true,
+				message: `No cache found for user ${userId}`
+			});
+		}
+	} else {
+		// Clear all cache
+		const count = Object.keys(passCache).length;
+		Object.keys(passCache).forEach(key => delete passCache[key]);
+		console.log(`All cache cleared (${count} entries)`);
+		res.json({
+			success: true,
+			message: `All cache cleared (${count} entries)`
+		});
+	}
+});
+
+// Cache info endpoint
+app.get('/api/cache/info', (req, res) => {
+	const cacheEntries = Object.keys(passCache).map(userId => {
+		const cached = passCache[userId];
+		const age = Date.now() - cached.timestamp;
+		const expiresIn = CACHE_DURATION - age;
+		
+		return {
+			userId: userId,
+			passCount: cached.passes.length,
+			ageSeconds: Math.round(age / 1000),
+			expiresInSeconds: Math.round(expiresIn / 1000),
+			isExpired: expiresIn <= 0
+		};
+	});
+	
+	res.json({
+		success: true,
+		cacheDuration: `${CACHE_DURATION / 1000} seconds`,
+		totalEntries: cacheEntries.length,
+		entries: cacheEntries
 	});
 });
 
