@@ -16,7 +16,8 @@ app.use(express.json());
 // Fetch game passes for a universe (experience-specific passes)
 async function fetchUniverseGamePasses(universeId) {
 	return new Promise((resolve, reject) => {
-		const url = `https://games.roblox.com/v1/games/${universeId}/game-passes`;
+		// NEW Roblox API endpoint (updated August 2025)
+		const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes?passView=Full&pageSize=100`;
 		
 		console.log('Calling Roblox Universe API:', url);
 
@@ -30,13 +31,23 @@ async function fetchUniverseGamePasses(universeId) {
 
 			res.on('end', () => {
 				try {
+					if (res.statusCode !== 200) {
+						console.error('API returned error status:', res.statusCode);
+						console.error('Response body:', data);
+						reject(new Error(`API returned status ${res.statusCode}: ${data}`));
+						return;
+					}
+					
 					const jsonData = JSON.parse(data);
 					resolve(jsonData);
 				} catch (error) {
+					console.error('Failed to parse JSON:', error);
+					console.error('Raw response:', data);
 					reject(error);
 				}
 			});
 		}).on('error', (error) => {
+			console.error('HTTP request error:', error);
 			reject(error);
 		});
 	});
@@ -83,34 +94,48 @@ app.get('/api/gamepasses', async (req, res) => {
 		// Prioritize universeId (experience-specific passes)
 		if (universeId) {
 			console.log('Fetching game passes for universe:', universeId);
-			const response = await fetchUniverseGamePasses(universeId);
-			
-			console.log('Universe API Response:', JSON.stringify(response, null, 2));
+			try {
+				const response = await fetchUniverseGamePasses(universeId);
+				
+				console.log('Universe API Response:', JSON.stringify(response, null, 2));
+				console.log('Response keys:', Object.keys(response || {}));
 
-			if (response && response.data) {
-				const allGamePasses = [];
-				for (const item of response.data) {
-					allGamePasses.push({
-						id: item.id || item.gamePassId,
-						name: item.name || 'Unknown',
-						icon: item.iconImageUrl || '',
-						description: item.description || ''
+				// The new API returns data in "data" array, or directly as array
+				const gamePassesArray = response.data || (Array.isArray(response) ? response : []);
+				
+				if (Array.isArray(gamePassesArray) && gamePassesArray.length > 0) {
+					const allGamePasses = [];
+					for (const item of gamePassesArray) {
+						allGamePasses.push({
+							id: item.id || item.gamePassId || item.assetId || item.passId,
+							name: item.name || item.displayName || 'Unknown',
+							icon: item.iconImageUrl || item.icon || item.imageUrl || '',
+							description: item.description || ''
+						});
+					}
+					
+					console.log(`Total universe game passes found: ${allGamePasses.length}`);
+					
+					return res.json({
+						success: true,
+						gamePasses: allGamePasses,
+						count: allGamePasses.length
+					});
+				} else {
+					console.log('No game passes in response or empty array');
+					console.log('Response type:', typeof gamePassesArray);
+					console.log('Is array:', Array.isArray(gamePassesArray));
+					return res.json({
+						success: true,
+						gamePasses: [],
+						count: 0
 					});
 				}
-				
-				console.log(`Total universe game passes found: ${allGamePasses.length}`);
-				
-				return res.json({
-					success: true,
-					gamePasses: allGamePasses,
-					count: allGamePasses.length
-				});
-			} else {
-				console.log('No data in universe response');
-				return res.json({
-					success: true,
-					gamePasses: [],
-					count: 0
+			} catch (error) {
+				console.error('Error fetching universe game passes:', error);
+				return res.status(500).json({
+					success: false,
+					error: error.message
 				});
 			}
 		}
