@@ -1,0 +1,17 @@
+{
+  "name": "tip-jar-proxy",
+  "version": "1.0.0",
+  "description": "Proxy server for Tip Jar game pass fetching",
+  "main": "proxy-server.js",
+  "scripts": {
+    "start": "node proxy-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
+
