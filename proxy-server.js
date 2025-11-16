@@ -439,7 +439,19 @@ app.get('/api/proxy', (req, res) => {
 	
 	console.log('Proxying request to:', decodedUrl);
 	
-	https.get(decodedUrl, (proxyRes) => {
+	// Add headers to make requests look legitimate
+	const options = {
+		headers: {
+			'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+			'Accept': 'application/json, text/plain, */*',
+			'Accept-Language': 'en-US,en;q=0.9',
+			'Accept-Encoding': 'gzip, deflate, br',
+			'Referer': 'https://www.roblox.com/',
+			'Origin': 'https://www.roblox.com'
+		}
+	};
+	
+	https.get(decodedUrl, options, (proxyRes) => {
 		let data = '';
 		
 		proxyRes.on('data', (chunk) => {
@@ -453,6 +465,12 @@ app.get('/api/proxy', (req, res) => {
 			// Set CORS headers
 			res.setHeader('Access-Control-Allow-Origin', '*');
 			res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'application/json');
+			
+			// Log the response status for debugging
+			if (proxyRes.statusCode !== 200) {
+				console.error(`Roblox API returned status ${proxyRes.statusCode} for: ${decodedUrl}`);
+				console.error('Response body:', data.substring(0, 500)); // First 500 chars
+			}
 			
 			if (proxyRes.statusCode === 200) {
 				res.send(data);
