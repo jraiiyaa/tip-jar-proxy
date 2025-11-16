@@ -331,6 +331,7 @@ app.get('/', (req, res) => {
 		message: 'Tip Jar Proxy Server is running!',
 		endpoints: {
 			gamePasses: '/api/gamepasses?userId=USER_ID&refresh=true (optional refresh to bypass cache)',
+			proxy: '/api/proxy?url=ENCODED_ROBLOX_URL (generic proxy for any Roblox API)',
 			clearCache: '/api/cache/clear?userId=USER_ID (clear cache for specific user)',
 			cacheInfo: '/api/cache/info (get cache statistics)'
 		},
@@ -389,6 +390,87 @@ app.get('/api/cache/info', (req, res) => {
 		cacheDuration: `${CACHE_DURATION / 1000} seconds`,
 		totalEntries: cacheEntries.length,
 		entries: cacheEntries
+	});
+});
+
+// Generic proxy endpoint - forwards any Roblox API request
+// Usage: /api/proxy?url=ENCODED_ROBLOX_URL
+// Example: /api/proxy?url=https%3A%2F%2Fcatalog.roblox.com%2Fv1%2Fsearch%2Fitems%2Fdetails%3FCategory%3D3%26CreatorName%3DUsername
+app.get('/api/proxy', (req, res) => {
+	const targetUrl = req.query.url;
+	
+	if (!targetUrl) {
+		return res.status(400).json({
+			success: false,
+			error: 'url parameter is required'
+		});
+	}
+	
+	// Decode the URL
+	let decodedUrl;
+	try {
+		decodedUrl = decodeURIComponent(targetUrl);
+	} catch (error) {
+		return res.status(400).json({
+			success: false,
+			error: 'Invalid URL encoding'
+		});
+	}
+	
+	// Only allow Roblox domains for security
+	const allowedDomains = [
+		'catalog.roblox.com',
+		'www.roblox.com',
+		'games.roblox.com',
+		'apis.roblox.com',
+		'thumbnails.roblox.com',
+		'avatar.roblox.com'
+	];
+	
+	const urlObj = new URL(decodedUrl);
+	const isAllowed = allowedDomains.some(domain => urlObj.hostname === domain || urlObj.hostname.endsWith('.' + domain));
+	
+	if (!isAllowed) {
+		return res.status(403).json({
+			success: false,
+			error: 'Only Roblox API domains are allowed'
+		});
+	}
+	
+	console.log('Proxying request to:', decodedUrl);
+	
+	https.get(decodedUrl, (proxyRes) => {
+		let data = '';
+		
+		proxyRes.on('data', (chunk) => {
+			data += chunk;
+		});
+		
+		proxyRes.on('end', () => {
+			// Forward the status code and headers
+			res.status(proxyRes.statusCode);
+			
+			// Set CORS headers
+			res.setHeader('Access-Control-Allow-Origin', '*');
+			res.setHeader('Content-Type', proxyRes.headers['content-type'] || 'application/json');
+			
+			if (proxyRes.statusCode === 200) {
+				res.send(data);
+			} else {
+				res.json({
+					success: false,
+					error: `API returned status ${proxyRes.statusCode}`,
+					statusCode: proxyRes.statusCode,
+					body: data
+				});
+			}
+		});
+	}).on('error', (error) => {
+		console.error('Proxy error:', error);
+		res.status(500).json({
+			success: false,
+			error: error.message
+		});
 	});
 });
 
